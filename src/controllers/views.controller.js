@@ -1,79 +1,53 @@
-import ProductModel from '../models/product.model.js';
-import cartModel from "../models/cart.model.js";
-import { ProductService } from '../services/index.js';
-import config from '../config/config.js'
+import { socketServer } from "../app.js";
+import { checkAuthorization, checkSession, sendError } from "../utils.js";
 
+class viewsController{
 
-export const readViewsProductsController = async (req, res) => {
-    try {
-      //const products = await ProductModel.find().lean().exec();
-      let pageNum = parseInt(req.query.page) || 1;
-      let itemsPorPage = parseInt(req.query.limit) || 10;
-      const products = await ProductModel.paginate({}, { page: pageNum , limit: itemsPorPage , lean:true });
-
-      products.prevLink = products.hasPrevPage ? `/products?limit=${itemsPorPage}&page=${products.prevPage}` : '';
-      products.nextLink = products.hasNextPage ? `/products?limit=${itemsPorPage}&page=${products.nextPage}` : '';
-      
-      // console.log(products);
-      
-      // Obtener los datos del usuario desde la sesión
-      const userInfo = {
-        first_name: req.session.user.first_name,
-        last_name: req.session.user.last_name,
-        email: req.session.user.email,
-        age: req.session.user.age,
-        role: req.session.user.role,
-      };
-      
-      // Renderizar la vista de productos y pasar los datos del usuario
-      res.render('home', { ...products, userInfo });
-    } catch (error) {
-      console.log('Error al leer los productos:', error);
-      res.status(500).json({ error: 'Error al leer los productos' });
+    allProducts =  async (req, res) => {
+        const { limit = 10 , page = 1, sort, category, status } = req.query;
+        let querySort = sort ? `&sort=${sort}` : '';
+        let queryCategory = category ? `&category=${category}` : '';
+        let queryStatus = status ? `&status=${status}` : ''
+        let response = await fetch(`http://localhost:8080/api/products/?limit=${limit}${querySort}${queryCategory}${queryStatus}&page=${page}`).then(res => res.json());
+        if(page < 0 || page > response.totalPages || isNaN(page)){
+          return res.send({ status: 'pagina no existente' })
+        }
+        res.render('products', {
+          style: 'products.css',
+          payload: response.payload,
+          user: req.session.user,
+        })
     }
-}
 
-export const readViewsRealTimeProductsController = async (req, res) => {
-    try {
-      //const products = await ProductModel.find().lean().exec();
-      const products = await ProductService.getAll()
-      res.render('realTimeProducts', { products });
-    } catch (error) {
-      console.log('Error al leer los productos en tiempo real:', error);
-      res.status(500).json({ error: 'Error al leer los productos en tiempo real' });
+    realTimeProducts = async (req, res) => {
+        socketServer.on('connection', () => console.log('cliente conectado'))
+        const products = await manager1.getProducts();
+        res.render('realTimeProducts', {
+          style: 'realTimeProducts.css',
+          products
+        });
     }
-}
 
-export const readViewsProductController = async (req, res) => {
-    try {
-      const id = req.params.cid
-      //const result = await ProductModel.findById(id).lean().exec();
-      const result = await ProductService.getById(id)
-      const cartInfo = {
-        cart: req.session.user.cart,
-      };
-
-      const userAdminControl = req.session.user.email != config.adminEmail ? true : false;
-
-      if (result === null) {
-        return res.status(404).json({ status: 'error', error: 'Product not found' });
+    oneCart = async (req, res) => {
+        let { cid } = req.params;
+        try {
+          let cartProducts = await fetch(`http://localhost:8080/api/carts/${cid}`).then(res => res.json());
+          if (cartProducts.status) return res.send({ status: cartProducts.status })
+          res.render('detailsCart', { style: 'detailsCart.css', cartProducts });
+        } catch (error) {
+          return sendError(res, 400, error);
+        }
       }
-      res.render('productDetail', { product: result, cartID: cartInfo.cart, userAdminControl: userAdminControl});
-    } catch (error) {
-      res.status(500).json({ error: 'Error al leer los productos' });
-    }
-}
 
-export const readViewsCartController = async (req, res) => {
-    try {
-      const id = req.params.cid
-      const result = await cartModel.findById(id).lean().exec();
-      if (result === null) {
-        return res.status(404).json({ status: 'error', error: 'Cart not found' });
+    getChat = async (req, res) => {
+        const messages = await fetch(`http://localhost:8080/api/chat`).then(res => res.json());
+        res.render('chat', {
+          style: 'chat.css',
+          messages
+        })
       }
-      res.render('carts', { cid: result._id, products: result.products });
-    } catch (error) {
-      res.status(500).json({ status: 'error', error: error.message });
-    }
+
 }
 
+
+export default new viewsController()

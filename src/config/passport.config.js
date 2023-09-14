@@ -1,122 +1,95 @@
 import passport from 'passport';
-import localStrategy from 'passport-local';
+import { Strategy as LocalStrategy } from 'passport-local'
+import { Strategy as JWTStrategy, ExtractJwt } from 'passport-jwt';
 import GithubStrategy from 'passport-github2';
-import UserModel from '../models/user.model.js';
-import { hasAdminCredentials } from "../public/js/authMiddleware.js";
-import bcrypt from 'bcryptjs';
-import config from './config.js';
-
-// Datos de configuración de la estrategia de autenticación con Github
-const githubClientID = config.githubClientId;
-const githubClientSecret = config.githubClientSecret;
+import userRepository from '../models/repositories/user.repository.js';
+import cartRepository from '../models/repositories/cart.repository.js';
+import UserDto from '../models/dtaos/user.dto.js'
+import { generateHash, isValidPassword } from '../utils.js'
+import { cookieExtractor } from './passport.utilities.js';
+import keys from '../config/config.env.js';
 
 const initializePassport = () => {
-
-    passport.use('register', new localStrategy({
-      passReqToCallback: true,
-      usernameField: 'email',
-    }, async (req, username, password, done) => {
-      const { first_name, last_name, email, age } = req.body;
+  // GITHUB STRATEGY
+  passport.use('github', new GithubStrategy({
+    clientID: keys.CLIENT_ID,
+    clientSecret: keys.CLIENT_SECRET,
+    callbackURL: keys.CALLBACK_URL,
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      let user = await userRepository.getOneUser({ email: profile._json.email })
+      if (!user) {
+        let { _id } = await cartRepository.createCart();
+        let auxUser = {
+          first_name: profile._json.name,
+          last_name: '',
+          email: profile._json.email,
+          age: '',
+          password: '',
+          cart: _id,
+          role: 'user'
+        }
+        let response = await userRepository.createUser(auxUser);
+        done(null, new UserDto(response));
+      }
+      else {
+        done(null, new UserDto(user));
+      }
+    } catch (error) {
+      return done(error);
+    }
+  }))
+  // PASSPORT JWT
+  passport.use('current', new JWTStrategy({
+    jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor]),
+    secretOrKey: 'Farah',
+  }, async (jwt_payload, done) => {
+    try {
+      return done(null, new UserDto(jwt_payload));
+    } catch (error) {
+      return done(error, false);
+    }
+  }))
+  // PASSPORT - LOCAL - REGISTER
+  passport.use('register', new LocalStrategy(
+    { passReqToCallback: true, usernameField: 'email' }, async (req, username, password, done) => {
       try {
-        const user = await UserModel.findOne({ email: username });
-        if (user) {
-          return done(null, false, { message: 'El correo electrónico ya está en uso.' });
-        }
-
-        // Verificar las credenciales de administrador
-        const isAdminCredentials = hasAdminCredentials(email, password);
-
-        // Encriptar la contraseña con bcryptjs
-        const saltRounds = 10;
-        const hashedPassword = bcrypt.hashSync(password, saltRounds);
-        const newUser = new UserModel({
-            first_name,
-            last_name,
-            email,
-            age,
-            password: hashedPassword,
-            role: isAdminCredentials ? 'admin' : 'usuario'
-        });
-  
-        await newUser.save();
-
-        const userNew = {
-            _id: newUser._id,
-            first_name: newUser.first_name,
-            last_name: newUser.last_name,
-            email: newUser.email,
-            age: newUser.age,
-            role: newUser.role
-        }
-
-        return done(null, newUser);
+        let { first_name, last_name, email, age } = req.body;
+        if (!first_name || !last_name || !email || !age) return done(null, false);
+        let user = await userRepository.getOneUser({ email: username });
+        if (user) return done(null, false);
+        let { _id } = await cartRepository.createCart();
+        let auxUser = { first_name, last_name, email, age, password: generateHash(password), cart: _id };
+        let response = await userRepository.createUser(auxUser);
+        done(null, response)
       } catch (error) {
-        console.log(error.message);
         return done(error);
       }
-    }));
-  
-    passport.use('login', new localStrategy({
-      usernameField: 'email',
-    }, async (username, password, done) => {
+    }))
+  // PASSPORT - LOCAL - LOGIN
+  passport.use('login', new LocalStrategy(
+    { usernameField: 'email' }, async (username, password, done) => {
       try {
-        const user = await UserModel.findOne({ email: username });
-        if (!user) {
-          return done(null, false, { message: 'Credenciales inválidas.' });
+        if (username === keys.ADMIN_EMAIL && password === keys.ADMIN_PASSWORD) {
+          let adminUser = { first_name: username, role: 'admin' };
+          return done(null, adminUser);
         }
-  
-        const passwordsMatch = await bcrypt.compareSync(password, user.password);
-        if (!passwordsMatch) {
-          return done(null, false, { message: 'Credenciales inválidas.' });
-        }
-
-        const userSession = {
-            _id: user._id,
-            first_name: user.first_name,
-            last_name: user.last_name,
-            email: user.email,
-            age: user.age,
-            role: user.role
-        }
-
-        return done(null, user);
-      } catch (error) {
-        console.log(error.message);
-        return done(error);
-      }
-    }));
-    
-    passport.use('github', new GithubStrategy({
-        clientID: githubClientID,
-        clientSecret: githubClientSecret,
-        callbackURL: 'http://localhost:8080/api/sessions/githubcallback'
-    }, async (accessToken, refreshToken, profile, done) => {
-        console.log(profile)
-        try {
-            const user = await UserModel.findOne({ email: profile._json.login})
-            if (user) return done(null, user)
-            const newUser = await UserModel.create({
-                first_name: profile._json.name,
-                last_name: " ",
-                email: profile._json.login,
-                age: 0,
-                password: " "
-            })
-            return done(null, newUser)
-        }
-        catch (error) {
-            console.log(error.message)
-            return done('Error al intentar loguearse con Github.')
-        }
-    }));
-
-    passport.serializeUser((user, done) => {
-        done(null, user._id);
-    })
-    passport.deserializeUser(async (id, done) => {
-        const user = await UserModel.findById(id);
+        let user = await userRepository.getOneUser({ email: username })
+        if (!user) return done(null, false, 'No user found');
+        if (!isValidPassword(password, user.password)) return done(null, false, 'Invalid password');
+        delete user._doc.password;
         done(null, user);
-    })
+      } catch (error) {
+        return done(error);
+      }
+    }
+  ))
+  passport.serializeUser((user, done) => done(null, user._id || user.role))
+
+  passport.deserializeUser(async (id, done) => {
+    let user = await userRepository.getOneUser({ _id: id });
+    done(null, user);
+  })
 
 }
 
