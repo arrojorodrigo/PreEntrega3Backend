@@ -10,6 +10,8 @@ import { Server } from 'socket.io';
 import handlebars from 'express-handlebars'
 import __dirname from './utils.js';
 
+import swaggerJSDoc from 'swagger-jsdoc';
+import SwaggerUiExpress from 'swagger-ui-express';
 import productsRouter from './routes/router.products.js'
 import cartRouter from './routes/router.cart.js'
 import viewRouter from './routes/router.views.js'
@@ -23,6 +25,18 @@ mongoose.connect(keys.MONGO_URL).catch(error => {
   console.log(error)
   process.exit();
 });
+
+// SWAGGER
+const swaggerOptions = {
+  
+  definition: {
+    openapi: "3.1.0", 
+    info: {title: "DOCUMENTACION ECOMERCE", description:"documentacion para coder"}
+},
+  apis: ['./docs/products.yaml', './docs/cars.yaml']
+}
+
+const swaggerDocs = swaggerJSDoc(swaggerOptions)
 
 // MIDDLEWARES
 app.use(express.json());
@@ -57,3 +71,6 @@ app.use('/api/products/', productsRouter);
 app.use('/api/carts/', cartRouter)
 app.use('/api/auth/', authRouter)
 app.use('/api/chat/', chatRouter)
+app.use('/docs/', SwaggerUiExpress.serve, SwaggerUiExpress.setup (swaggerDocs))
+
+
