@@ -30,10 +30,10 @@ mongoose.connect(keys.MONGO_URL).catch(error => {
 const swaggerOptions = {
   
   definition: {
-    openapi: "3.1.0", 
+    openapi: "3.0.0", 
     info: {title: "DOCUMENTACION ECOMERCE", description:"documentacion para coder"}
 },
-  apis: ['./docs/products.yaml', './docs/cars.yaml']
+    apis: [`${__dirname}/docs/*.json`]
 }
 
 const swaggerDocs = swaggerJSDoc(swaggerOptions)
@@ -74,3 +74,4 @@ app.use('/api/chat/', chatRouter)
 app.use('/docs/', SwaggerUiExpress.serve, SwaggerUiExpress.setup (swaggerDocs))
 
 
+console.log(__dirname)
